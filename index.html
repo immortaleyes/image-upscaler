@@ -81,6 +81,8 @@
   .out-bar .info b{color:var(--green)}
   .dl{background:transparent;border:1px solid var(--amber);color:var(--amber);font-family:"DM Mono";font-size:13px;padding:11px 20px;border-radius:9px;cursor:pointer;text-decoration:none;transition:.15s;display:inline-flex;align-items:center;gap:8px}
   .dl:hover{background:var(--amber);color:#1a1305}
+  .dl.reset{border-color:var(--line);color:var(--ink-dim)}
+  .dl.reset:hover{background:var(--panel-2);color:var(--ink)}
   .note{font-size:11px;color:var(--ink-dim);line-height:1.65;margin-top:22px;border-top:1px solid var(--line);padding-top:16px}
   .note b{color:var(--amber-soft)}
   footer.site{text-align:center;margin-top:36px;padding-top:22px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-dim);letter-spacing:.03em;line-height:1.7}
@@ -96,7 +98,7 @@
     <div class="brand">
       <h1>Clar<em>i</em>ty</h1>
       <p>Enlarge images with real detail. <b style="color:var(--ink)">Sharp</b> mode uses Lanczos resampling + contrast-adaptive sharpening; <b style="color:var(--ink)">AI</b> mode reconstructs detail with an ESRGAN neural network — all in your browser.</p>
-    </header>
+      </header>
 
   <div class="grid">
     <div style="display:flex;flex-direction:column;gap:22px">
@@ -120,6 +122,7 @@
         <div class="prog hidden" id="prog"><div class="track"><div class="bar" id="progBar"></div></div><div class="txt" id="progTxt"></div></div>
         <div class="out-bar hidden" id="outBar">
           <div class="info" id="outInfo"></div>
+          <button class="dl reset" id="reset" type="button">&#8635; Reset</button>
           <a class="dl" id="dl" download>&#8595; Download</a>
         </div>
       </div>
@@ -242,7 +245,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
       $('mSize').innerHTML=`${fmtBytes(f.size)} <small>${(f.type.split('/')[1]||'').toUpperCase()}</small>`;
       $('meta').classList.remove('hidden');
       $('pxW').value=im.naturalWidth*2; $('pxH').value=im.naturalHeight*2;
-      $('go').disabled=false; updateEstimate(); URL.revokeObjectURL(url);
+      $('go').disabled=false; updateEstimate(); clearOutput(); URL.revokeObjectURL(url);
     };
     im.onerror=()=>alert('Could not load that image.');
     im.src=url;
@@ -364,14 +367,48 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   }
 
   /* ---------------- AI engine (ESRGAN via TensorFlow.js + UpscalerJS) ---------------- */
-  const VER='1.0.0';
+  const CDN='https://cdn.jsdelivr.net/npm/';
+  const SCRIPTS={
+    tf:        CDN+'@tensorflow/tfjs@4.11.0/dist/tf.min.js',
+    defModel:  CDN+'@upscalerjs/default-model@1.0.0/dist/umd/index.min.js',
+    upscaler:  CDN+'upscaler@1.0.0/dist/browser/umd/upscaler.min.js',
+  };
+  const MODELS={
+    'esrgan-slim':  {url:CDN+'@upscalerjs/esrgan-slim@1.0.0/dist/umd/models/esrgan-slim/src/x4/index.min.js',     global:'ESRGANSlim4x'},
+    'esrgan-medium':{url:CDN+'@upscalerjs/esrgan-medium@1.0.0/dist/umd/models/esrgan-medium/src/x4/index.min.js', global:'ESRGANMedium4x'},
+    'esrgan-thick': {url:CDN+'@upscalerjs/esrgan-thick@1.0.0/dist/umd/models/esrgan-thick/src/x4/index.min.js',   global:'ESRGANThick4x'},
+  };
+  function loadScript(src){
+    return new Promise((res,rej)=>{
+      if([...document.scripts].some(s=>s.src===src))return res();
+      const s=document.createElement('script');
+      s.src=src; s.async=true;
+      s.onload=()=>res();
+      s.onerror=()=>rej(new Error('Could not load '+src+' (network/CDN blocked?)'));
+      document.head.appendChild(s);
+    });
+  }
+  let coreReady=false;
+  async function ensureCore(){
+    if(coreReady)return;
+    progress(0,'Loading TensorFlow.js\u2026');      await loadScript(SCRIPTS.tf);
+    progress(0,'Loading model runtime\u2026');       await loadScript(SCRIPTS.defModel);
+    // UpscalerJS UMD factory reads window.DefaultUpscalerModel; the package exports
+    // window.DefaultUpscalerJSModel — alias it before loading the upscaler bundle.
+    window.DefaultUpscalerModel = window.DefaultUpscalerModel || window.DefaultUpscalerJSModel;
+    progress(0,'Loading upscaler\u2026');             await loadScript(SCRIPTS.upscaler);
+    coreReady=true;
+  }
   const upscalers={};
   async function getUpscaler(modelName){
+    await ensureCore();
     if(upscalers[modelName])return upscalers[modelName];
-    progress(0,'Loading AI engine\u2026');
-    const U=(await import(`https://cdn.jsdelivr.net/npm/upscaler@${VER}/+esm`)).default;
-    const m=(await import(`https://cdn.jsdelivr.net/npm/@upscalerjs/${modelName}@${VER}/4x/+esm`)).default;
-    const up=new U({model:m});
+    const def=MODELS[modelName];
+    progress(0,'Loading AI model \u2014 '+modelName+'\u2026');
+    await loadScript(def.url);
+    const modelDef=window[def.global];
+    if(!modelDef)throw new Error('Model "'+def.global+'" failed to register');
+    const up=new window.Upscaler({model:modelDef});
     upscalers[modelName]=up;return up;
   }
   function canvasFromImageSrc(src){
@@ -385,6 +422,16 @@ document.getElementById('yr').textContent = new Date().getFullYear();
     $('progTxt').textContent=txt||`Reconstructing\u2026 ${Math.round((rate||0)*100)}%`;
   }
   function hideProgress(){$('prog').classList.add('hidden');$('progBar').style.width='0';}
+
+  function clearOutput(){
+    if(outBlobUrl){URL.revokeObjectURL(outBlobUrl);outBlobUrl=null;}
+    $('stage').innerHTML='<div class="empty">Your upscaled image will appear here</div>';
+    $('outBar').classList.add('hidden');
+    $('outInfo').textContent='';
+    $('dl').removeAttribute('href');
+    hideProgress();
+  }
+  $('reset').onclick=clearOutput;
 
   /* ---------------- run ---------------- */
   $('go').onclick=async()=>{
@@ -406,9 +453,9 @@ document.getElementById('yr').textContent = new Date().getFullYear();
     if(engine==='ai'){
       try{
         const up=await getUpscaler(aiModel);
-        progress(0.02,'Reconstructing detail\u2026');
-        const b64=await up.upscale(img,{patchSize:64,padding:4,
-          progress:(rate)=>progress(0.02+ (rate||0)*0.92)});
+        progress(0.05,'Reconstructing detail\u2026');
+        const b64=await up.upscale(srcCanvas,{patchSize:64,padding:6,
+          progress:(rate)=>progress(0.05+(rate||0)*0.9)});
         let aiCv=await canvasFromImageSrc(b64);          // model output (≈4×)
         if(aiCv.width!==tw||aiCv.height!==th)            // fit to requested size
           aiCv=lanczosResize(aiCv,tw,th);
