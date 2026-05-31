@@ -76,6 +76,8 @@
   .prog .track{height:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:100px;overflow:hidden}
   .prog .bar{height:100%;width:0;background:linear-gradient(90deg,var(--amber),var(--green));transition:width .2s}
   .prog .txt{font-size:11px;color:var(--ink-dim);margin-top:7px}
+  .warn{background:rgba(233,162,59,.12);border:1px solid var(--amber);color:var(--amber-soft);font-size:11.5px;line-height:1.55;border-radius:9px;padding:11px 13px;margin-bottom:12px}
+  .warn b{color:#ffd591}
   .out-bar{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
   .out-bar .info{font-size:11.5px;color:var(--ink-dim);flex:1;min-width:160px}
   .out-bar .info b{color:var(--green)}
@@ -98,7 +100,8 @@
     <div class="brand">
       <h1>Clar<em>i</em>ty</h1>
       <p>Enlarge images with real detail. <b style="color:var(--ink)">Sharp</b> mode uses Lanczos resampling + contrast-adaptive sharpening; <b style="color:var(--ink)">AI</b> mode reconstructs detail with an ESRGAN neural network — all in your browser.</p>
-      </header>
+    
+  </header>
 
   <div class="grid">
     <div style="display:flex;flex-direction:column;gap:22px">
@@ -118,6 +121,7 @@
           <h2 style="margin:0"><span class="num">3</span> Result</h2>
           <span class="est" id="est"></span>
         </div>
+        <div class="warn hidden" id="warn"></div>
         <div class="stage" id="stage"><div class="empty">Your upscaled image will appear here</div></div>
         <div class="prog hidden" id="prog"><div class="track"><div class="bar" id="progBar"></div></div><div class="txt" id="progTxt"></div></div>
         <div class="out-bar hidden" id="outBar">
@@ -135,20 +139,20 @@
       <div class="field">
         <label>Engine</label>
         <div class="seg" id="engineSeg">
-          <button data-e="sharp" class="on">Sharp &middot; instant</button>
-          <button data-e="ai">AI &middot; best detail</button>
+          <button data-e="ai" class="on">AI &middot; best detail</button>
+          <button data-e="sharp">Sharp &middot; instant</button>
         </div>
-        <p class="sub" id="engineHint">Lanczos-3 resampling + contrast-adaptive sharpening. Crisp, instant, works on any size.</p>
+        <p class="sub" id="engineHint">ESRGAN neural network reconstructs real detail. Slower; loads a model on first run. Runs on the deployed HTTPS site.</p>
       </div>
 
-      <div class="field hidden" id="aiField">
+      <div class="field" id="aiField">
         <label>AI model</label>
         <div class="seg" id="aiModelSeg">
-          <button data-m="esrgan-slim" class="on">Fast</button>
+          <button data-m="esrgan-slim">Fast</button>
           <button data-m="esrgan-medium">Balanced</button>
-          <button data-m="esrgan-thick">Max</button>
+          <button data-m="esrgan-thick" class="on">Max</button>
         </div>
-        <p class="sub">Heavier models reconstruct more detail but take longer. First run downloads the model (~few MB).</p>
+        <p class="sub">Heavier models reconstruct more detail but take longer. First run downloads the model. <b>Max</b> gives the best quality this browser-only tool can reach.</p>
       </div>
 
       <div class="field">
@@ -222,7 +226,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
 (() => {
   const $ = id => document.getElementById(id);
   let img=null, srcCanvas=null, origName="image", outBlobUrl=null;
-  let engine='sharp', mode='scale', scale=2, fmt='image/png', aiModel='esrgan-slim';
+  let engine='ai', mode='scale', scale=2, fmt='image/png', aiModel='esrgan-thick';
 
   /* ---------------- file loading ---------------- */
   const drop=$('drop'), fileInput=$('file');
@@ -427,6 +431,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
     if(outBlobUrl){URL.revokeObjectURL(outBlobUrl);outBlobUrl=null;}
     $('stage').innerHTML='<div class="empty">Your upscaled image will appear here</div>';
     $('outBar').classList.add('hidden');
+    $('warn').classList.add('hidden');
     $('outInfo').textContent='';
     $('dl').removeAttribute('href');
     hideProgress();
@@ -448,6 +453,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   async function run(){
     const[tw,th]=targetDims();
     const sharp=parseInt($('sharp').value)/100;
+    $('warn').classList.add('hidden');
     let result;
 
     if(engine==='ai'){
@@ -460,10 +466,11 @@ document.getElementById('yr').textContent = new Date().getFullYear();
         if(aiCv.width!==tw||aiCv.height!==th)            // fit to requested size
           aiCv=lanczosResize(aiCv,tw,th);
         if(sharp>0)cas(aiCv,sharp*0.5);                  // gentle finish on AI
-        result=aiCv; progress(1,'Done');
+        result=aiCv; progress(1,'Done \u2014 AI reconstruction');
       }catch(e){
         console.warn('AI engine unavailable, using Sharp:',e);
-        $('progTxt').textContent='AI engine could not load here \u2014 used Sharp instead.';
+        $('warn').innerHTML='<b>AI did not run here</b> &mdash; the neural model could not load in this environment, so this is a classical (resize-only) result, which looks soft. The AI engine needs to load from a CDN, which works on your <b>deployed HTTPS site</b> (GitHub Pages), not in a preview sandbox or a local file. Open the published page and try again.';
+        $('warn').classList.remove('hidden');
         result=cas(lanczosResize(srcCanvas,tw,th),sharp);
       }
     }else{
