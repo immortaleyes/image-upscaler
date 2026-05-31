@@ -2,7 +2,7 @@
 
 A lightweight, browser-based tool that upscales low-resolution images into larger, sharper versions. It increases an image's pixel dimensions and applies a clarity-boosting sharpening pass — all **entirely in the browser**, with no uploads and no server.
 
-**Live demo:** `[https://immortaleyes.github.io/image-upscaler/]`
+**Live demo:** [immortaleyes.github.io/image-upscaler](https://immortaleyes.github.io/image-upscaler/)
 
 ---
 
